@@ -135,7 +135,7 @@ NSString* const SocketIOException = @"SocketIOException";
         
         // do handshake via HTTP request
         NSString *protocol = _useSecure ? @"https" : @"http";
-        NSString *port = _port ? [NSString stringWithFormat:@":%d", _port] : @"";
+        NSString *port = _port ? [NSString stringWithFormat:@":%ld", (long)_port] : @"";
         NSTimeInterval time = [[NSDate date] timeIntervalSince1970] * 1000;
         NSString *handshakeUrl = [NSString stringWithFormat:kHandshakeURL, protocol, _host, port, kResourceName,kTransportPolling, time, query];
         //@"%@://%@%@/%@/1/?t=%.0f%@";
@@ -185,7 +185,7 @@ NSString* const SocketIOException = @"SocketIOException";
 - (void) disconnectForced
 {
     NSString *protocol = [self useSecure] ? @"https" : @"http";
-    NSString *port = _port ? [NSString stringWithFormat:@":%d", _port] : @"";
+    NSString *port = _port ? [NSString stringWithFormat:@":%ld", (long)_port] : @"";
     NSString *urlString = [NSString stringWithFormat:kForceDisconnectURL, protocol, _host, port, kResourceName, _sid];
     NSURL *url = [NSURL URLWithString:urlString];
     DEBUGLOG(@"Force disconnect at: %@", urlString);
@@ -291,6 +291,7 @@ NSString* const SocketIOException = @"SocketIOException";
     if (function) {
         packet.ack = @"data";
     }
+    NSLog(@"%@", packet.data);
     [self send:packet];
 }
 
@@ -338,7 +339,7 @@ NSString* const SocketIOException = @"SocketIOException";
         return;
     }
     DEBUGLOG(@"Prepare to send()");
-    
+    packet.endpoint = _endpoint;
     
     NSString *req = [packet toString];
     if (![_transport isReady]) {
@@ -686,10 +687,10 @@ NSString* const SocketIOException = @"SocketIOException";
                     //??
                     break;
                 case 2:
-                {
+                
                     //Ping->Pong
                     [self sendMessage:[NSString stringWithFormat:@"3:%@", data]];
-                }    break;
+                    break;
                 case 3:
                     //Pong
                     if([data isEqualToString:@"probe"])
@@ -708,7 +709,7 @@ NSString* const SocketIOException = @"SocketIOException";
                     //GET ENDPOINT
                     NSUInteger rendpoint = [packet.data rangeOfString:@"["].location;
                     if(rendpoint == NSNotFound)
-                        packet.endpoint = @"";
+                        packet.endpoint = packet.data;
                     else
                         packet.endpoint = [packet.data substringToIndex:rendpoint];
                     
@@ -741,7 +742,8 @@ NSString* const SocketIOException = @"SocketIOException";
                                 packet.args = [parsedData subarrayWithRange:NSMakeRange(1, parsedData.count-1)];
                                 if([packet.name isEqualToString:@"message"])
                                 {
-                                    packet.data = packet.args[0];
+                                    // data is specified as NSString, so rewrap it...
+                                    packet.data = [SocketIOJSONSerialization JSONStringFromObject:packet.args[0] error:nil];
                                     if ([_delegate respondsToSelector:@selector(socketIO:didReceiveMessage:)]) {
                                         [_delegate socketIO:self didReceiveMessage:packet];
                                     }
@@ -759,8 +761,8 @@ NSString* const SocketIOException = @"SocketIOException";
                         {
                             
                             if (ack > 0) {
-                                int ackId = ack;
-                                DEBUGLOG(@"ack id found: %d", ackId);
+                                NSUInteger ackId = ack;
+                                DEBUGLOG(@"ack id found: %d", (unsigned int)ackId);
                                 
                                 NSString *argsStr = [packet.data substringFromIndex:1 ];
                                 argsStr = [argsStr substringToIndex:argsStr.length-1];
@@ -774,7 +776,7 @@ NSString* const SocketIOException = @"SocketIOException";
                                 }
                                 
                                 // get selector for ackId
-                                NSString *key = [NSString stringWithFormat:@"%d", ackId];
+                                NSString *key = [NSString stringWithFormat:@"%d", (unsigned int)ackId];
                                 SocketIOCallback callbackFunction = [_acks objectForKey:key];
                                 if (callbackFunction != nil) {
                                     callbackFunction(argsData);
@@ -864,7 +866,7 @@ NSString* const SocketIOException = @"SocketIOException";
     // check for server status code (http://gigliwood.com/weblog/Cocoa/Q__When_is_an_conne.html)
     if ([response respondsToSelector:@selector(statusCode)]) {
         NSInteger statusCode = [((NSHTTPURLResponse *)response) statusCode];
-        DEBUGLOG(@"didReceiveResponse() %i", statusCode);
+        DEBUGLOG(@"didReceiveResponse() %i", (int)statusCode);
         
         if (statusCode >= 400) {
             // stop connecting; no more delegate messages
@@ -1009,7 +1011,8 @@ NSString* const SocketIOException = @"SocketIOException";
         DEBUGLOG(@"VERSION 10x");
         _version = V10x;
         //...0{"sid":"<sid>","upgrades":[<transports>,...],"pingInterval":<timeHeartbeat>,"pingTimeout":<timeOut>}
-        responseString = [responseString substringFromIndex:[responseString rangeOfString:@"{"].location];
+        if([responseString rangeOfString:@"{"].location != NSNotFound)
+            responseString = [responseString substringFromIndex:[responseString rangeOfString:@"{"].location];
         DEBUGLOG(@"Response %@", responseString);
         connectionFailed = true;
         NSData *utf8Data = [responseString dataUsingEncoding:NSUTF8StringEncoding];
